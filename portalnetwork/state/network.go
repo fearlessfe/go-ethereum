@@ -14,6 +14,7 @@ import (
 	"github.com/ethereum/go-ethereum/portalnetwork/history"
 	"github.com/ethereum/go-ethereum/rlp"
 	"github.com/ethereum/go-ethereum/rpc"
+	"github.com/ethereum/go-ethereum/trie"
 	"github.com/protolambda/zrnt/eth2/beacon/common"
 	"github.com/protolambda/zrnt/eth2/configs"
 	"github.com/protolambda/ztyp/codec"
@@ -174,24 +175,54 @@ func (h *StateNetwork) getStateRoot(blockHash common.Bytes32) (common.Bytes32, e
 }
 
 func validateNodeTrieProof(rootHash common.Bytes32, nodeHash common.Bytes32, path *Nibbles, proof *TrieProof) error {
-
-	return nil
-}
-
-func validateTreiProof(rootHash common.Bytes32, path []byte, proof *TrieProof) error {
-	if (len(*proof) == 0) {
-		return errors.New("proof should be empty")
+	lastNode, p, err := validateTrieProof(rootHash, path.Nibbles, proof)
+	if err != nil {
+		return err
 	}
-	first := []EncodedTrieNode(*proof)[0]
-	checkNodeHash(&first, rootHash)
-
-	// for _, node := range []EncodedTrieNode(*proof)[1:] {
-
-	// }
+	if len(p) == 0 {
+		return errors.New("path is too long")
+	}
+	err = checkNodeHash(&lastNode, nodeHash)
+	if err != nil {
+		return err
+	}
 	return nil
 }
 
-func checkNodeHash(node *EncodedTrieNode, hash common.Bytes32) bool {
+func validateTrieProof(rootHash common.Bytes32, path []byte, proof *TrieProof) (EncodedTrieNode, []byte, error) {
+	if (len(*proof) == 0) {
+		return nil, nil, errors.New("proof should be empty")
+	}
+	firstNode := []EncodedTrieNode(*proof)[0]
+	err := checkNodeHash(&firstNode, rootHash)
+	if err != nil {
+		return nil, nil, err
+	}
+
+	node := firstNode
+	remainingPath := path
+
+	for _, nextNode := range []EncodedTrieNode(*proof)[1:] {
+		n, err := trie.DecodeTrieNode(nil, node)
+		if err != nil {
+			return  nil, nil, err
+		}
+		_, p, err := trie.TraverseTrieNode(n, remainingPath)
+		if err != nil {
+			return  nil, nil, err
+		}
+		// checkNodeHash(&nextNode, common.Root{})
+
+		node = nextNode
+		remainingPath = p
+	}
+	return node, remainingPath, nil
+}
+
+func checkNodeHash(node *EncodedTrieNode, hash common.Bytes32) error {
 	nodeHash := node.NodeHash()
-	return bytes.Equal(nodeHash[:], hash[:])
+	if !bytes.Equal(nodeHash[:], hash[:]) {
+		return fmt.Errorf("node hash is not equal, expect: %v, actual: %v", hash, nodeHash)
+	}
+	return nil
 }
